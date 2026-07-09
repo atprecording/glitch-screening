@@ -18,6 +18,14 @@
     position: absolute; inset: 0; width: 100%; height: 100%;
     object-fit: cover; background: #000;
   }
+  /* Chrome forces its own letterboxing on <video> elements once the page
+     goes fullscreen, overriding the object-fit above. Re-assert it here
+     scoped to the fullscreen state so our crop wins instead of the
+     browser's default. */
+  #stage:fullscreen video,
+  #stage:-webkit-full-screen video {
+    object-fit: cover !important;
+  }
   #glitch { opacity: 0; }
   #glitch.visible { opacity: 1; }
   #main.hidden { opacity: 0; }
