@@ -44,6 +44,26 @@
     padding: 6px 10px; font-size: 0.75rem; cursor: pointer;
   }
   #fullscreenBtn:hover { background: rgba(255,255,255,0.18); }
+
+  #controlBar {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, rgba(0,0,0,0.7), rgba(0,0,0,0));
+    opacity: 1; transition: opacity 200ms ease;
+  }
+  #controlBar.hidden { opacity: 0; pointer-events: none; }
+  #playPauseBtn {
+    flex: none; width: 40px; height: 32px; font-size: 1rem; cursor: pointer;
+    background: rgba(255,255,255,0.12); color: #fff;
+    border: 1px solid rgba(255,255,255,0.25); border-radius: 6px;
+  }
+  #playPauseBtn:hover { background: rgba(255,255,255,0.22); }
+  #scrubBar { flex: 1; accent-color: #e11; cursor: pointer; }
+  #timeDisplay {
+    flex: none; min-width: 88px; text-align: right;
+    color: rgba(255,255,255,0.7); font-size: 0.75rem; font-variant-numeric: tabular-nums;
+  }
 </style>
 </head>
 <body>
@@ -53,6 +73,12 @@
 
     <button id="fullscreenBtn" type="button">Fullscreen</button>
     <div id="hud">glitches: <span id="count">0</span></div>
+
+    <div id="controlBar">
+      <button id="playPauseBtn" type="button" aria-label="Pause">&#10074;&#10074;</button>
+      <input id="scrubBar" type="range" min="0" max="100" step="0.01" value="0">
+      <span id="timeDisplay">0:00 / 0:00</span>
+    </div>
 
     <div id="startOverlay">
       <button id="startBtn" type="button">Start</button>
@@ -66,6 +92,7 @@
   const GLITCH_MS = 5000;   // how long the glitch track stays up per trigger
   const POLL_MS = 300;      // how often to ask the server for new triggers
   const TICK_MS = 50;       // how often to re-evaluate on/off state locally
+  const IDLE_MS = 2500;     // hide playback controls after this long without mouse movement
 
   // This page runs locally (the video files are too big to deploy), so it
   // can't use a relative URL - fill in your actual Netlify site URL here
@@ -81,27 +108,101 @@
   const fullscreenBtn = document.getElementById('fullscreenBtn');
   const countEl = document.getElementById('count');
   const stage = document.getElementById('stage');
+  const controlBar = document.getElementById('controlBar');
+  const playPauseBtn = document.getElementById('playPauseBtn');
+  const scrubBar = document.getElementById('scrubBar');
+  const timeDisplay = document.getElementById('timeDisplay');
 
   let started = false;
-  let glitchUntil = 0;       // timestamp; glitch is "on" while now < glitchUntil
+  let glitchUntil = 0;       // timestamp; glitch is "on" while virtualNow() < glitchUntil
   let lastAppliedOn = null;  // avoid touching the DOM every tick
   let localCount = 0;
   let lastServerCount = null;
 
+  let isPaused = false;
+  let pauseStartedAt = null; // Date.now() when the current pause began, else null
+  let pausedAccumMs = 0;     // total ms spent paused so far
+  let isScrubbing = false;
+  let wasPlayingBeforeScrub = false;
+  let idleTimer = null;
+
+  // A glitch-timing clock that ignores time spent paused, so pausing mid
+  // glitch resumes exactly where it left off instead of snapping back the
+  // instant playback resumes (Date.now() alone would keep ticking while
+  // the videos are frozen).
+  function virtualNow() {
+    const base = pauseStartedAt !== null ? pauseStartedAt : Date.now();
+    return base - pausedAccumMs;
+  }
+
+  function formatTime(seconds) {
+    if (!isFinite(seconds)) return '0:00';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
   function fireGlitch() {
-    glitchUntil = computeGlitchUntil(Date.now(), GLITCH_MS);
+    glitchUntil = computeGlitchUntil(virtualNow(), GLITCH_MS);
     localCount += 1;
     countEl.textContent = localCount;
   }
 
   function applyGlitchState() {
-    const on = isGlitchActive(glitchUntil, Date.now());
+    const on = isGlitchActive(glitchUntil, virtualNow());
     if (on === lastAppliedOn) return;
     lastAppliedOn = on;
     glitchVideo.classList.toggle('visible', on);
     mainVideo.classList.toggle('hidden', on);
     glitchVideo.muted = !on;
     mainVideo.muted = on;
+  }
+
+  function showControls() {
+    controlBar.classList.remove('hidden');
+    clearTimeout(idleTimer);
+  }
+
+  function resetIdleTimer() {
+    showControls();
+    if (isPaused) return; // stay visible while paused
+    idleTimer = setTimeout(() => controlBar.classList.add('hidden'), IDLE_MS);
+  }
+
+  function pauseBoth() {
+    if (isPaused) return;
+    isPaused = true;
+    pauseStartedAt = Date.now();
+    mainVideo.pause();
+    glitchVideo.pause();
+    playPauseBtn.textContent = '▶';
+    playPauseBtn.setAttribute('aria-label', 'Play');
+    showControls();
+  }
+
+  function playBoth() {
+    if (!isPaused) return;
+    pausedAccumMs += Date.now() - pauseStartedAt;
+    pauseStartedAt = null;
+    isPaused = false;
+    mainVideo.play();
+    glitchVideo.play();
+    playPauseBtn.textContent = '❙❙';
+    playPauseBtn.setAttribute('aria-label', 'Pause');
+    resetIdleTimer();
+  }
+
+  function seekBothTo(t) {
+    return Promise.all([
+      new Promise((resolve) => {
+        mainVideo.addEventListener('seeked', resolve, { once: true });
+        mainVideo.currentTime = t;
+      }),
+      new Promise((resolve) => {
+        glitchVideo.addEventListener('seeked', resolve, { once: true });
+        glitchVideo.currentTime = t;
+      }),
+    ]);
   }
 
   async function start() {
@@ -112,6 +213,7 @@
     try {
       await Promise.all([mainVideo.play(), glitchVideo.play()]);
       startOverlay.remove();
+      resetIdleTimer();
     } catch (err) {
       console.error('Playback failed - tap Start again', err);
       started = false;
@@ -140,6 +242,12 @@
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'g' || e.key === 'G') fireGlitch();
+
+    const focusTag = document.activeElement && document.activeElement.tagName;
+    if (e.code === 'Space' && focusTag !== 'BUTTON' && focusTag !== 'INPUT') {
+      e.preventDefault();
+      if (isPaused) playBoth(); else pauseBoth();
+    }
   });
 
   fullscreenBtn.addEventListener('click', () => {
@@ -149,6 +257,43 @@
       stage.requestFullscreen().catch(() => {});
     }
   });
+
+  playPauseBtn.addEventListener('click', () => {
+    if (isPaused) playBoth(); else pauseBoth();
+  });
+
+  mainVideo.addEventListener('loadedmetadata', () => {
+    scrubBar.max = mainVideo.duration;
+  });
+
+  mainVideo.addEventListener('timeupdate', () => {
+    if (isScrubbing) return;
+    scrubBar.value = mainVideo.currentTime;
+    timeDisplay.textContent = `${formatTime(mainVideo.currentTime)} / ${formatTime(mainVideo.duration)}`;
+  });
+
+  scrubBar.addEventListener('input', () => {
+    // Live target-time preview while dragging; the actual (expensive, two
+    // 4K files) seek only happens once the user releases the slider.
+    timeDisplay.textContent = `${formatTime(Number(scrubBar.value))} / ${formatTime(mainVideo.duration)}`;
+  });
+
+  scrubBar.addEventListener('pointerdown', () => {
+    isScrubbing = true;
+    wasPlayingBeforeScrub = !isPaused;
+    if (!isPaused) pauseBoth();
+    showControls();
+  });
+
+  scrubBar.addEventListener('change', async () => {
+    const t = Number(scrubBar.value);
+    await seekBothTo(t);
+    isScrubbing = false;
+    if (wasPlayingBeforeScrub) playBoth();
+    else resetIdleTimer();
+  });
+
+  stage.addEventListener('mousemove', resetIdleTimer);
 
   setInterval(applyGlitchState, TICK_MS);
   setInterval(poll, POLL_MS);

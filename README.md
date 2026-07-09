@@ -66,6 +66,15 @@ needs the full URL since it's no longer on the same domain as the function.
 4. If the network trigger is ever flaky, press **g** on the player's
    keyboard to fire a glitch locally (doesn't touch the server counter).
 5. Use the **Fullscreen** button on the player for a clean screen-share.
+6. A play/pause button and scrub bar sit at the bottom of the player.
+   They control both videos together, so they never fall out of sync -
+   pausing pauses both, and dragging the scrub bar seeks both to the same
+   point. Spacebar also toggles play/pause. If you pause mid-glitch, the
+   5-second glitch window is frozen too and picks up exactly where it left
+   off once you resume, rather than snapping back the instant you unpause.
+   The whole control bar auto-hides after a couple of seconds of no mouse
+   movement (so it isn't visible to your Teams audience during playback)
+   and reappears on mouse move, or stays visible while paused.
 
 ## 4. Resetting between screenings
 
@@ -89,6 +98,7 @@ Everything you're likely to want to tweak is a constant at the top of each file:
 |---|---|---|
 | `player/index.html` | `GLITCH_MS` | how long the glitch track stays up per press |
 | `player/index.html` | `POLL_MS` | how often the player checks the server for new presses |
+| `player/index.html` | `IDLE_MS` | how long until the play/pause/scrub bar auto-hides |
 | `button/index.html` | `COOLDOWN_S` | client-side cooldown display (seconds) |
 | `netlify/functions/trigger.js` | `COOLDOWN_MS` | server-enforced cooldown (must match `COOLDOWN_S * 1000`) |
 | `netlify/functions/trigger.js` | `RESET_WORD` | the `?reset=` secret |
