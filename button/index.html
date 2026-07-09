@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Glitch Button</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; background: #0a0a0a; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    touch-action: manipulation;
+  }
+  #wrap {
+    display: flex; flex-direction: column; align-items: center; gap: 1.25rem;
+    padding: 1rem;
+  }
+  #warning {
+    color: rgba(255,255,255,0.35); font-size: 0.8rem; letter-spacing: 0.08em;
+    text-transform: uppercase; user-select: none;
+  }
+  #glitchBtn {
+    width: min(70vw, 70vh); height: min(70vw, 70vh); border-radius: 50%;
+    border: none; cursor: pointer;
+    background: radial-gradient(circle at 35% 30%, #ff5a4d, #c8001c 70%);
+    box-shadow: 0 0 0 8px rgba(255,0,0,0.08), 0 10px 40px rgba(200,0,20,0.5),
+      inset 0 -6px 18px rgba(0,0,0,0.35);
+    color: #fff; font-size: clamp(1.2rem, 6vw, 2rem); font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    transition: transform 80ms ease;
+    -webkit-user-select: none; user-select: none;
+  }
+  #glitchBtn:active:not(:disabled) { transform: scale(0.94); }
+  #glitchBtn:disabled {
+    background: radial-gradient(circle at 35% 30%, #555, #222 70%);
+    cursor: not-allowed; color: rgba(255,255,255,0.6);
+  }
+  #status {
+    color: rgba(255,255,255,0.5); font-size: 0.9rem; min-height: 1.2em;
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="warning">do not press</div>
+    <button id="glitchBtn" type="button">PRESS</button>
+    <div id="status"></div>
+  </div>
+
+<script>
+(() => {
+  // ---- Tweakable constants ----
+  const COOLDOWN_S = 20; // must match COOLDOWN_MS in netlify/functions/trigger.js
+  const FUNCTION_URL = '/.netlify/functions/trigger';
+
+  const btn = document.getElementById('glitchBtn');
+  const status = document.getElementById('status');
+
+  let cooldownTimer = null;
+
+  function render(remaining) {
+    btn.textContent = 'GLITCHING...';
+    status.textContent = `wait ${remaining}s`;
+  }
+
+  function startCooldown(seconds) {
+    clearInterval(cooldownTimer);
+    let remaining = Math.max(1, Math.ceil(seconds));
+    btn.disabled = true;
+    render(remaining);
+    cooldownTimer = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(cooldownTimer);
+        cooldownTimer = null;
+        btn.disabled = false;
+        btn.textContent = 'PRESS';
+        status.textContent = '';
+        return;
+      }
+      render(remaining);
+    }, 1000);
+  }
+
+  async function press() {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'GLITCHING...';
+    status.textContent = '';
+    try {
+      const res = await fetch(FUNCTION_URL, { method: 'POST' });
+      const data = await res.json();
+      if (res.status === 429) {
+        startCooldown(data.remainingSeconds ?? COOLDOWN_S);
+      } else if (res.ok) {
+        startCooldown(COOLDOWN_S);
+      } else {
+        throw new Error('bad response');
+      }
+    } catch (err) {
+      status.textContent = 'network hiccup, try again';
+      btn.disabled = false;
+      btn.textContent = 'PRESS';
+    }
+  }
+
+  // If the page loads mid-cooldown (e.g. a phone reloads it), reflect the
+  // real server state instead of letting the button be pressed early.
+  async function checkInitialState() {
+    try {
+      const res = await fetch(FUNCTION_URL, { cache: 'no-store' });
+      const data = await res.json();
+      const remaining = (data.lockedUntil - Date.now()) / 1000;
+      if (remaining > 0) startCooldown(remaining);
+    } catch (err) {
+      // ignore - button just stays pressable
+    }
+  }
+
+  btn.addEventListener('click', press);
+  checkInitialState();
+})();
+</script>
+</body>
+</html>

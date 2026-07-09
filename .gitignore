@@ -1,0 +1,9 @@
+node_modules/
+.netlify/
+.DS_Store
+.claude/
+
+# Video files are huge (GBs) and never get pushed to git/Netlify.
+# The player page runs locally with these sitting next to it on disk.
+player/main.mp4
+player/glitch.mp4
